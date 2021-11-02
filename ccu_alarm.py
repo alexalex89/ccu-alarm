@@ -1,9 +1,7 @@
 from lxml import etree
 from models import sensors, status
-from urllib.parse import urlencode
 
 import collections
-import json
 import os
 import requests
 import time
@@ -11,8 +9,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
-URL = "https://homematic-raspi/addons/xmlapi"
-APIKEY = "CM%2d40EABA6B%2d634A%2d4698%2d9E47%2d0F3FABC37C81"
+URL = os.environ["CCU_URL"]
 
 
 def init_devices(device_types=("HmIP-SMI", "HMIP-SWDO")):
@@ -25,23 +22,17 @@ def init_devices(device_types=("HmIP-SMI", "HMIP-SWDO")):
     return device_map
 
 
-# devices = init_devices()
-# with open(os.path.join(os.path.dirname(__file__), "devices.json"), "w") as f_devices:
-#     json.dump(devices, f_devices)
-with open(os.path.join(os.path.dirname(__file__), "devices.json"), "r") as f_devices:
-    devices = json.load(f_devices)
-
-
-def send_push(message, subject="ALARM"):
+def send_push(message, api_key, subject="ALARM"):
     requests.post("https://www.meine-homematic.de/prowlv3.php",
                   data={"id": 57913,
                         "key": "s10m20s27k68e95y59",
-                        "apikey": APIKEY,
+                        "apikey": api_key,
                         "event": subject,
                         "pushtext": message},
                   verify=False).raise_for_status()
 
 
+devices = init_devices()
 state = {}
 
 
@@ -49,15 +40,21 @@ while True:
     resp = requests.get(f"{URL}/sysvarlist.cgi", verify=False)
     sys_vars = etree.fromstring(resp.text.encode())
     alarm_status = status.AlarmStatus.from_id(int(sys_vars.xpath("/systemVariables/systemVariable[@name='Alarm']")[0].get("value")))
+    alarm_status_ise = sys_vars.xpath("/systemVariables/systemVariable[@name='Alarm']")[0].get("ise_id")
+    alarm_delay_ise = sys_vars.xpath("/systemVariables/systemVariable[@name='AlarmDelay']")[0].get("ise_id")
+    api_key = sys_vars.xpath("/systemVariables/systemVariable[@name='SmarthaPush']")[0].get("value")
 
     if alarm_status == status.AlarmStatus.UNSCHARF:
         print("Disabled.")
+        requests.get(f"{URL}/statechange.cgi?ise_id={alarm_delay_ise}&new_value=false", verify=False)
+        state = {}
         time.sleep(15)
         continue
 
     print("Next iteration")
     for device_type, device_ids in devices.items():
-        resp = requests.get(f"{URL}//state.cgi?device_id={','.join(device_ids)}", verify=False)
+        error = False
+        resp = requests.get(f"{URL}/state.cgi?device_id={','.join(device_ids)}", verify=False)
         device_list = etree.fromstring(resp.text.encode("latin1"))
         for device in device_list.xpath("/state/device"):
             if device_type == "HmIP-SMI":
@@ -69,7 +66,16 @@ while True:
 
             ise_id = dev.ise_id
             if ise_id in state and not state[ise_id].check(alarm_status) and dev.check(alarm_status):
-                send_push(message=dev.name.replace(" ", "+"))
+                send_push(message=dev.name.replace(" ", "+"), api_key=api_key)
+                requests.get(f"{URL}/statechange.cgi?ise_id={alarm_delay_ise}&new_value=true", verify=False)
                 print(f"!!!ALARM {dev.name}!!!")
+            if ise_id not in state and dev.check(alarm_status):
+                # Protection activated but one sensor is already in alarm mode! Disable protection and send warning
+                send_push(message=f"Cannot activate protection! {dev.name.replace(' ', '+')} already alarming!", api_key=api_key)
+                requests.get(f"{URL}/statechange.cgi?ise_id={alarm_status_ise}&new_value=0", verify=False)
+                error = True
+                break
             state[ise_id] = dev
+        if error:
+            break
     time.sleep(5)
