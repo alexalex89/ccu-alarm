@@ -23,4 +23,4 @@ It is recommended to use the docker image:
 
 The environment variable CCU_URL must point to the root of the XML API. Default value is ```https://homematic-raspi/addons/xmlapi```
 
-```docker run -d --restart=unless-stopped --name=ccu-alarm -e CCU_URL=<url_to_you_xml_api>```
+```docker run -d --restart=unless-stopped --name=ccu-alarm -e CCU_URL=<url_to_you_xml_api> alexalex89/ccu-alarm:latest```

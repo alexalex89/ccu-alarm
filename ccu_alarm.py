@@ -28,7 +28,7 @@ def send_push(message, api_key, subject="ALARM"):
                         "key": "s10m20s27k68e95y59",
                         "apikey": api_key,
                         "event": subject,
-                        "pushtext": message},
+                        "pushtext": message.replace(" ", "+")},
                   verify=False).raise_for_status()
 
 
@@ -66,12 +66,14 @@ while True:
 
             ise_id = dev.ise_id
             if ise_id in state and not state[ise_id].check(alarm_status) and dev.check(alarm_status):
-                send_push(message=dev.name.replace(" ", "+"), api_key=api_key)
+                send_push(message=dev.name, api_key=api_key)
                 requests.get(f"{URL}/statechange.cgi?ise_id={alarm_delay_ise}&new_value=true", verify=False)
                 print(f"!!!ALARM {dev.name}!!!")
+            if ise_id in state and not state[ise_id].sabotage(alarm_status) and dev.sabotage(alarm_status):
+                send_push(message=f"Sensor {dev.name} is sabotated!", api_key=api_key)
             if ise_id not in state and dev.check(alarm_status):
                 # Protection activated but one sensor is already in alarm mode! Disable protection and send warning
-                send_push(message=f"Cannot activate protection! {dev.name.replace(' ', '+')} already alarming!", api_key=api_key)
+                send_push(message=f"Cannot activate protection! {dev.name} already alarming!", api_key=api_key)
                 requests.get(f"{URL}/statechange.cgi?ise_id={alarm_status_ise}&new_value=0", verify=False)
                 error = True
                 break
