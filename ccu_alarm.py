@@ -22,18 +22,20 @@ def init_devices(device_types=("HmIP-SMI", "HMIP-SWDO")):
     return device_map
 
 
-def send_push(message, api_key, subject="ALARM"):
-    requests.post("https://www.meine-homematic.de/prowlv3.php",
-                  data={"id": 57913,
-                        "key": "s10m20s27k68e95y59",
-                        "apikey": api_key,
-                        "event": subject,
-                        "pushtext": message.replace(" ", "+")},
-                  verify=False).raise_for_status()
+def send_push(message, api_keys, subject="ALARM"):
+    for api_key in api_keys:
+        requests.post("https://www.meine-homematic.de/prowlv3.php",
+                      data={"id": 57913,
+                            "key": "s10m20s27k68e95y59",
+                            "apikey": api_keys,
+                            "event": subject,
+                            "pushtext": message.replace(" ", "+")},
+                      verify=False).raise_for_status()
 
 
 devices = init_devices()
 state = {}
+last_alarm_status = status.AlarmStatus.UNSCHARF
 
 
 while True:
@@ -42,11 +44,24 @@ while True:
     alarm_status = status.AlarmStatus.from_id(int(sys_vars.xpath("/systemVariables/systemVariable[@name='Alarm']")[0].get("value")))
     alarm_status_ise = sys_vars.xpath("/systemVariables/systemVariable[@name='Alarm']")[0].get("ise_id")
     alarm_delay_ise = sys_vars.xpath("/systemVariables/systemVariable[@name='AlarmDelay']")[0].get("ise_id")
-    api_key = sys_vars.xpath("/systemVariables/systemVariable[@name='SmarthaPush']")[0].get("value")
+    api_keys = []
+    for var in sys_vars.xpath("/systemVariables/systemVariable"):
+        if var.get("name", "").startswith("SmarthaPush"):
+            api_keys.append(var.get("value"))
+
+    if alarm_status != last_alarm_status:
+        if alarm_status == status.AlarmStatus.HUELLSCHUTZ:
+            send_push("Huellschutz aktiviert!", api_keys)
+        elif alarm_status == status.AlarmStatus.VOLLSCHUTZ:
+            time.sleep(120)
+            send_push("Vollschutz aktiviert!", api_keys)
+        elif alarm_status == status.AlarmStatus.UNSCHARF:
+            requests.get(f"{URL}/statechange.cgi?ise_id={alarm_delay_ise}&new_value=false", verify=False)
+            send_push("Alarm deaktiviert!", api_keys)
+        last_alarm_status = alarm_status
 
     if alarm_status == status.AlarmStatus.UNSCHARF:
         print("Disabled.")
-        requests.get(f"{URL}/statechange.cgi?ise_id={alarm_delay_ise}&new_value=false", verify=False)
         state = {}
         time.sleep(15)
         continue
@@ -66,14 +81,16 @@ while True:
 
             ise_id = dev.ise_id
             if ise_id in state and not state[ise_id].check(alarm_status) and dev.check(alarm_status):
-                send_push(message=dev.name, api_key=api_key)
+                send_push(message=dev.name, api_keys=api_keys)
                 requests.get(f"{URL}/statechange.cgi?ise_id={alarm_delay_ise}&new_value=true", verify=False)
                 print(f"!!!ALARM {dev.name}!!!")
+            if (ise_id in state and not state[ise_id].low_bat and dev.low_bat) or dev.low_bat:
+                send_push(message=f"Device {dev.name} has low battery!", api_keys=api_keys)
             if ise_id in state and not state[ise_id].sabotage(alarm_status) and dev.sabotage(alarm_status):
-                send_push(message=f"Sensor {dev.name} is sabotated!", api_key=api_key)
+                send_push(message=f"Sensor {dev.name} is sabotated!", api_keys=api_keys)
             if ise_id not in state and dev.check(alarm_status):
                 # Protection activated but one sensor is already in alarm mode! Disable protection and send warning
-                send_push(message=f"Cannot activate protection! {dev.name} already alarming!", api_key=api_key)
+                send_push(message=f"Cannot activate protection! {dev.name} already alarming!", api_keys=api_keys)
                 requests.get(f"{URL}/statechange.cgi?ise_id={alarm_status_ise}&new_value=0", verify=False)
                 error = True
                 break

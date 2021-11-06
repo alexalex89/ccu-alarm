@@ -6,6 +6,7 @@ class HMIPBase(object):
     def __init__(self, xml):
         self.ise_id = xml.get("ise_id")
         self.name = xml.get("name")
+        self.low_bat = xml.xpath("./channel/datapoint[@type='LOW_BAT']")[0].get("value") == "true"
 
     def check(self, status: AlarmStatus):
         raise NotImplementedError()
