@@ -23,14 +23,13 @@ def init_devices(device_types=("HmIP-SMI", "HMIP-SWDO")):
 
 
 def send_push(message, api_keys, subject="ALARM"):
-    for api_key in api_keys:
-        requests.post("https://www.meine-homematic.de/prowlv3.php",
-                      data={"id": 57913,
-                            "key": "s10m20s27k68e95y59",
-                            "apikey": api_keys,
-                            "event": subject,
-                            "pushtext": message.replace(" ", "+")},
-                      verify=False).raise_for_status()
+    requests.post("https://www.meine-homematic.de/prowlv3.php",
+                  data={"id": 57913,
+                        "key": "s10m20s27k68e95y59",
+                        "apikey": ",".join(api_keys),
+                        "event": subject,
+                        "pushtext": message.replace(" ", "+")},
+                  verify=False).raise_for_status()
 
 
 devices = init_devices()
