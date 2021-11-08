@@ -36,6 +36,7 @@ def send_push(message, api_keys, subject="ALARM"):
 devices = init_devices()
 state = {}
 last_alarm_status = status.AlarmStatus.UNSCHARF
+delay_full_protection = False
 
 
 while True:
@@ -53,8 +54,8 @@ while True:
         if alarm_status == status.AlarmStatus.HUELLSCHUTZ:
             send_push("Huellschutz aktiviert!", api_keys)
         elif alarm_status == status.AlarmStatus.VOLLSCHUTZ:
-            time.sleep(120)
             send_push("Vollschutz aktiviert!", api_keys)
+            delay_full_protection = True
         elif alarm_status == status.AlarmStatus.UNSCHARF:
             requests.get(f"{URL}/statechange.cgi?ise_id={alarm_delay_ise}&new_value=false", verify=False)
             send_push("Alarm deaktiviert!", api_keys)
@@ -80,6 +81,8 @@ while True:
                 continue
 
             ise_id = dev.ise_id
+            if dev.delay and delay_full_protection:
+                continue
             if ise_id in state and not state[ise_id].check(alarm_status) and dev.check(alarm_status):
                 send_push(message=dev.name, api_keys=api_keys)
                 requests.get(f"{URL}/statechange.cgi?ise_id={alarm_delay_ise}&new_value=true", verify=False)
@@ -91,10 +94,14 @@ while True:
             if ise_id not in state and dev.check(alarm_status):
                 # Protection activated but one sensor is already in alarm mode! Disable protection and send warning
                 send_push(message=f"Cannot activate protection! {dev.name} already alarming!", api_keys=api_keys)
+                delay_full_protection = False
                 requests.get(f"{URL}/statechange.cgi?ise_id={alarm_status_ise}&new_value=0", verify=False)
                 error = True
                 break
             state[ise_id] = dev
         if error:
             break
+    if delay_full_protection:
+        time.sleep(120)
+        delay_full_protection = False
     time.sleep(5)
